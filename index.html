@@ -1,0 +1,119 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>간단한 멀티플레이어 게임</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <h1>간단한 멀티플레이어 게임</h1>
+    <canvas id="gameCanvas" width="800" height="600"></canvas>
+    <div id="chatBox">
+        <div id="messages"></div>
+        <input type="text" id="chatInput" placeholder="메시지를 입력하세요...">
+        <button id="sendButton">보내기</button>
+    </div>
+
+    <script src="/socket.io/socket.io.js"></script>
+    <script>
+        const socket = io(); // 서버와 연결
+
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+        const messagesDiv = document.getElementById('messages');
+        const chatInput = document.getElementById('chatInput');
+        const sendButton = document.getElementById('sendButton');
+
+        let players = {}; // 현재 게임에 접속한 모든 플레이어 정보
+
+        // 서버로부터 현재 모든 플레이어 정보 수신
+        socket.on('currentPlayers', (serverPlayers) => {
+            players = serverPlayers;
+            drawPlayers();
+        });
+
+        // 서버로부터 새로운 플레이어 접속 정보 수신
+        socket.on('newPlayer', (playerInfo) => {
+            players[playerInfo.id] = playerInfo;
+            drawPlayers();
+        });
+
+        // 서버로부터 플레이어 이동 정보 수신
+        socket.on('playerMoved', (data) => {
+            if (players[data.playerId]) {
+                players[data.playerId].x = data.x;
+                players[data.playerId].y = data.y;
+                drawPlayers();
+            }
+        });
+
+        // 서버로부터 플레이어 접속 해제 정보 수신
+        socket.on('playerDisconnected', (playerId) => {
+            delete players[playerId];
+            drawPlayers();
+        });
+
+        // 플레이어 그리기 함수
+        function drawPlayers() {
+            ctx.clearRect(0, 0, canvas.width, canvas.height); // 캔버스 지우기
+            for (let id in players) {
+                const player = players[id];
+                ctx.fillStyle = player.color;
+                ctx.fillRect(player.x, player.y, 50, 50); // 플레이어 사각형 그리기
+                ctx.fillStyle = 'black';
+                ctx.fillText(id.substring(0, 5), player.x, player.y - 5); // 플레이어 ID 표시
+            }
+        }
+
+        // 키보드 이벤트 리스너 (플레이어 이동 예시)
+        document.addEventListener('keydown', (e) => {
+            let player = players[socket.id];
+            if (!player) return;
+
+            let moved = false;
+            const speed = 10;
+            switch (e.key) {
+                case 'ArrowUp': player.y -= speed; moved = true; break;
+                case 'ArrowDown': player.y += speed; moved = true; break;
+                case 'ArrowLeft': player.x -= speed; moved = true; break;
+                case 'ArrowRight': player.x += speed; moved = true; break;
+            }
+
+            // 캔버스 경계 내로 제한
+            player.x = Math.max(0, Math.min(canvas.width - 50, player.x));
+            player.y = Math.max(0, Math.min(canvas.height - 50, player.y));
+
+            if (moved) {
+                // 서버로 플레이어 이동 정보 전송
+                socket.emit('playerMovement', { x: player.x, y: player.y });
+                drawPlayers(); // 자신의 화면도 즉시 업데이트
+            }
+        });
+
+
+        // 채팅 메시지 전송
+        sendButton.addEventListener('click', () => {
+            const message = chatInput.value;
+            if (message) {
+                socket.emit('chatMessage', message); // 서버로 메시지 전송
+                chatInput.value = '';
+            }
+        });
+
+        chatInput.addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') {
+                sendButton.click();
+            }
+        });
+
+        // 서버로부터 채팅 메시지 수신
+        socket.on('chatMessage', (data) => {
+            const messageElement = document.createElement('p');
+            messageElement.textContent = `[${data.sender.substring(0, 5)}] ${data.message}`;
+            messagesDiv.appendChild(messageElement);
+            messagesDiv.scrollTop = messagesDiv.scrollHeight; // 스크롤을 항상 아래로
+        });
+    </script>
+</body>
+</html>
